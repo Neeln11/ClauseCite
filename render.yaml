@@ -1,0 +1,38 @@
+# Render Blueprint — backend API only. The frontend deploys to Vercel.
+#
+# Storage is deliberately ephemeral: Render's container filesystem is wiped on
+# every deploy and restart, so uploaded PDFs and the SQLite database reset
+# together. That consistency is the point — a persistent Postgres paired with
+# ephemeral blobs would leave documents marked "ready" whose PDFs no longer
+# exist, and every citation on them would fail to render.
+#
+# To make it durable later: add a Render Postgres instance (the initial
+# migration creates the `vector` and `pgcrypto` extensions itself), set
+# DATABASE_URL to its internal connection string, run `alembic upgrade head`
+# as a pre-deploy command, and point AZURE_STORAGE_CONNECTION_STRING at a blob
+# container instead of the local path.
+
+services:
+  - type: web
+    name: clausecite-api
+    runtime: docker
+    plan: free
+    region: singapore
+    dockerfilePath: ./backend/Dockerfile
+    # The Dockerfile does `COPY pyproject.toml ./`, so the build context has to
+    # be backend/, not the repository root.
+    dockerContext: ./backend
+    # Liveness only — matches what the endpoint promises, and must not depend
+    # on a database, or a brief wobble restarts the service.
+    healthCheckPath: /health
+    envVars:
+      - key: ENVIRONMENT
+        # Switches logging to JSON, which is what Render's log viewer parses.
+        value: production
+      - key: LOG_LEVEL
+        value: INFO
+      - key: CORS_ORIGINS
+        # Set in the dashboard to the Vercel URL, e.g.
+        # https://your-app.vercel.app — a mismatch here surfaces in the browser
+        # as "cannot reach the API" rather than as a CORS error.
+        sync: false

@@ -1,0 +1,85 @@
+{
+  "_comment": "Hand-labelled question -> expected source document(s) pairs for backend/scripts/eval_retrieval.py. Each question should retrieve a chunk from at least one of expected_filenames within the top-K sources returned by /api/chat. Filenames match scripts/contracts.py.",
+  "pairs": [
+    {
+      "question": "What is the notice period for terminating the Henderson lease?",
+      "expected_filenames": ["Henderson_Commercial_Lease.pdf"]
+    },
+    {
+      "question": "How much is the monthly rent for the Henderson premises, and when is it reviewed?",
+      "expected_filenames": ["Henderson_Commercial_Lease.pdf"]
+    },
+    {
+      "question": "Who is responsible for structural repairs under the lease?",
+      "expected_filenames": ["Henderson_Commercial_Lease.pdf"]
+    },
+    {
+      "question": "Can the tenant assign or sublet the premises without consent?",
+      "expected_filenames": ["Henderson_Commercial_Lease.pdf"]
+    },
+    {
+      "question": "What insurance is the landlord required to maintain?",
+      "expected_filenames": ["Henderson_Commercial_Lease.pdf"]
+    },
+    {
+      "question": "What uptime does the Brightline agreement commit to, and what happens if it is missed?",
+      "expected_filenames": ["Brightline_Master_Services_Agreement.pdf"]
+    },
+    {
+      "question": "Who owns intellectual property created under the Brightline services agreement?",
+      "expected_filenames": ["Brightline_Master_Services_Agreement.pdf"]
+    },
+    {
+      "question": "What is the cap on liability under the Brightline master services agreement?",
+      "expected_filenames": ["Brightline_Master_Services_Agreement.pdf"]
+    },
+    {
+      "question": "How are fees invoiced and what is the payment term under the Brightline agreement?",
+      "expected_filenames": ["Brightline_Master_Services_Agreement.pdf"]
+    },
+    {
+      "question": "What are the grounds for terminating the Brightline master services agreement?",
+      "expected_filenames": ["Brightline_Master_Services_Agreement.pdf"]
+    },
+    {
+      "question": "What data protection obligations apply under the Brightline agreement?",
+      "expected_filenames": ["Brightline_Master_Services_Agreement.pdf"]
+    },
+    {
+      "question": "How long do the confidentiality obligations last under the Vantage-Whitcombe NDA?",
+      "expected_filenames": ["Mutual_NDA_Vantage_Whitcombe.pdf"]
+    },
+    {
+      "question": "Does the NDA grant any licence to use the confidential information?",
+      "expected_filenames": ["Mutual_NDA_Vantage_Whitcombe.pdf"]
+    },
+    {
+      "question": "What non-solicitation restrictions does the NDA impose?",
+      "expected_filenames": ["Mutual_NDA_Vantage_Whitcombe.pdf"]
+    },
+    {
+      "question": "What must happen to confidential information when the NDA ends?",
+      "expected_filenames": ["Mutual_NDA_Vantage_Whitcombe.pdf"]
+    },
+    {
+      "question": "How much holiday is Rachel Okonjo entitled to, and can she carry it over?",
+      "expected_filenames": ["Employment_Agreement_R_Okonjo.pdf"]
+    },
+    {
+      "question": "What is Rachel Okonjo's probation period?",
+      "expected_filenames": ["Employment_Agreement_R_Okonjo.pdf"]
+    },
+    {
+      "question": "What are the post-termination restrictions on the employee in the Okonjo employment agreement?",
+      "expected_filenames": ["Employment_Agreement_R_Okonjo.pdf"]
+    },
+    {
+      "question": "Who owns intellectual property Rachel Okonjo creates during her employment?",
+      "expected_filenames": ["Employment_Agreement_R_Okonjo.pdf"]
+    },
+    {
+      "question": "What notice is required to terminate Rachel Okonjo's employment?",
+      "expected_filenames": ["Employment_Agreement_R_Okonjo.pdf"]
+    }
+  ]
+}

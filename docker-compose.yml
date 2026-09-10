@@ -1,0 +1,63 @@
+name: clausecite
+
+# Local development. The only service you strictly need is `db`:
+#
+#   docker compose up -d db          # Postgres 16 + pgvector
+#   cd backend && alembic upgrade head
+#   uvicorn app.main:app --reload    # backend on :8000
+#   cd frontend && npm run dev       # frontend on :5173
+#
+# `docker compose up` runs the whole stack in containers instead, which is the
+# configuration closest to production.
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: dev
+      POSTGRES_PASSWORD: dev
+      POSTGRES_DB: docqa
+    # 5433 on the host, not 5432: a machine with PostgreSQL installed natively
+    # already owns 5432, and a silent port collision presents as authentication
+    # failures against the wrong server, which is a miserable thing to debug.
+    ports: ["5433:5432"]
+    volumes: ["pgdata:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dev -d docqa"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build: ./backend
+    env_file: .env
+    environment:
+      # Inside the compose network, dependencies answer by service name. This
+      # overrides the host-oriented value in .env. Blob storage is left at its
+      # default (local filesystem, under backend/.data/blobs) - Render deploys
+      # get either a persistent disk mounted there or, above that scale, S3.
+      DATABASE_URL: postgresql+asyncpg://dev:dev@db:5432/docqa
+    depends_on:
+      db: {condition: service_healthy}
+    ports: ["8000:8000"]
+    volumes: ["./backend:/app"]
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  frontend:
+    build:
+      context: ./frontend
+      target: dev
+    environment:
+      # Baked into the bundle at build time by Vite, so it must be the URL the
+      # browser can reach, not a compose service name.
+      VITE_API_URL: http://localhost:8000
+    ports: ["5173:5173"]
+    volumes:
+      - ./frontend:/app
+      # Keeps the image's node_modules; a bind mount would otherwise hide it
+      # behind the host directory, which has none on a fresh clone.
+      - /app/node_modules
+    depends_on: [backend]
+
+volumes:
+  pgdata:

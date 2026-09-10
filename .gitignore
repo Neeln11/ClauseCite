@@ -1,0 +1,38 @@
+# Secrets and local state
+.env
+backend/.env
+# Claude Code's local session state/permissions — machine-specific, not shared.
+.claude/
+# Uploaded PDFs, the SQLite database, and the cached provider key all live here.
+backend/.data/
+.data/
+*.pem
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Node
+node_modules/
+frontend/dist/
+frontend/.vite/
+npm-debug.log*
+# Copied from pdfjs-dist by frontend/scripts/copy-pdfjs-assets.mjs on install.
+frontend/public/pdfjs/
+
+# Local-only planning doc — kept on disk, not published to the repo.
+AI-Document-QA-Documentation.md
+
+# Editors and OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
