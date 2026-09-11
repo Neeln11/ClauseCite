@@ -1,0 +1,37 @@
+# Render's free tier spins the backend down after ~15 minutes idle, which
+# means the first real request after that pays a ~50s cold start. This pings
+# /health often enough that the service never sees 15 idle minutes.
+#
+# /health, not /ready: /health is a pure liveness check with no dependency
+# checks (see backend/app/api/health.py), which is what a keep-alive ping
+# should hit — no reason to hammer the database or the LLM provider every 14
+# minutes just to keep the process warm.
+#
+# */14 lands at :00 :14 :28 :42 :56 each hour — a 4-minute gap once per hour,
+# 14-minute gaps otherwise, so the longest gap never reaches the 15-minute
+# sleep threshold.
+#
+# Caveat worth knowing: GitHub disables scheduled workflows automatically
+# after 60 days with no repository activity (a push, a merge, etc.). A push
+# to any branch resets that clock, so this only bites a repo that goes
+# fully dormant.
+name: Keep Render backend awake
+
+on:
+  schedule:
+    - cron: "*/14 * * * *"
+  # Lets you trigger a ping by hand from the Actions tab, e.g. right after
+  # deploying, without waiting for the schedule.
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping /health
+        run: |
+          if [ -z "${{ vars.RENDER_HEALTH_URL }}" ]; then
+            echo "::error::RENDER_HEALTH_URL is not set. Add it under Settings > Secrets and variables > Actions > Variables, e.g. https://clausecite-api.onrender.com/health"
+            exit 1
+          fi
+          curl -fsS --max-time 20 "${{ vars.RENDER_HEALTH_URL }}"
