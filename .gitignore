@@ -29,6 +29,7 @@ frontend/public/pdfjs/
 
 # Local-only planning doc — kept on disk, not published to the repo.
 AI-Document-QA-Documentation.md
+INTERVIEW_PREP.md
 
 # Editors and OS
 .DS_Store
