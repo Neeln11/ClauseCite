@@ -762,9 +762,7 @@ def _is_network_error(exc: Exception) -> bool:
     # openai SDK wraps most network errors as APIConnectionError, but
     # belt-and-suspenders: also check the status code absence.
     status = getattr(exc, "status_code", None)
-    if status is None and "connect" in type(exc).__name__.lower():
-        return True
-    return False
+    return status is None and "connect" in type(exc).__name__.lower()
 
 
 def _readable_provider_error(exc: Exception) -> str:
