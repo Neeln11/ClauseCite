@@ -572,6 +572,7 @@ class GenericLLMProvider:
     def __init__(self, api_key: str, profile: ProviderProfile, settings: Settings) -> None:
         from openai import AsyncOpenAI
 
+        self._api_key = api_key
         self._profile = profile
         self._settings = settings
         self._client = AsyncOpenAI(
@@ -627,35 +628,67 @@ class GenericLLMProvider:
             raise ProviderError(_readable_provider_error(exc)) from exc
 
     async def healthcheck(self) -> None:
-        """Verify the key *and* the configured model actually work.
+        """Verify the key and ensure a working model is configured.
 
-        This calls `/chat/completions` directly rather than `GET /models`
-        first: some providers accept any model id in `/models` and only 404 on
-        the endpoint that's actually used, which let a wrong model name (e.g.
-        the "models/" prefix Google's endpoint requires) report as connected
-        and only fail on the user's first real question.
+        Two-phase strategy:
+        1. Call `GET /models` — this is auth-only and model-name-independent.
+           A 401/403 here definitively means the key is wrong.
+        2. If the profile's default model is not in the live model list, pick
+           the first available one and update the runtime profile in place.
+           This makes the system self-healing when a provider retires a model.
 
         Error classification:
-        - 401/403 → `ProviderAuthError`: key is bad, caller must roll back.
-        - 404     → `ProviderConnectError`: model name may have been retired;
-                    the key itself is likely valid, so the caller accepts it.
-        - network → `ProviderConnectError`: provider unreachable right now.
+        - 401/403  → `ProviderAuthError`: key is bad, caller must roll back.
+        - network  → `ProviderConnectError`: provider unreachable right now.
         """
+        log = get_logger(__name__)
         try:
-            await self._client.chat.completions.create(
-                model=self._profile.model,
-                messages=[{"role": "user", "content": "ping"}],
-                max_tokens=1,
-            )
+            models_page = await self._client.models.list()
         except Exception as exc:
             msg = _readable_provider_error(exc)
-            status = getattr(exc, "status_code", None)
-            if _is_network_error(exc) or status == 404:
-                # Network down OR model not found: the key may still be valid.
-                # Accept and save it; the first real question will surface any
-                # remaining problems with a recoverable stream error.
+            if _is_network_error(exc):
                 raise ProviderConnectError(msg) from exc
             raise ProviderAuthError(msg) from exc
+
+        # Build set of available model ids, stripping ownership prefixes
+        # (some providers return "accounts/org/models/llama-x" style ids).
+        available: list[str] = [m.id for m in models_page.data if m.id]
+        if not available:
+            # Empty list: the endpoint is up and authenticated, but has no
+            # models. Treat as a connect problem — the provider may be setting
+            # up the account.
+            raise ProviderConnectError(
+                "The provider returned no available models. Try again shortly."
+            )
+
+        if self._profile.model not in available:
+            # The configured model was retired or renamed. Pick the first
+            # available model so the user gets an answer rather than an error.
+            # Prefer models whose name includes "instruct" or "chat" over raw
+            # base models, which typically refuse instruction-following prompts.
+            preferred = next(
+                (
+                    m
+                    for m in available
+                    if any(k in m for k in ("instruct", "chat", "versatile", "instant"))
+                ),
+                available[0],
+            )
+            log.info(
+                "provider.model_auto_selected",
+                requested=self._profile.model,
+                selected=preferred,
+                provider=self._profile.provider_id,
+            )
+            updated = dataclasses.replace(self._profile, model=preferred)
+            self._profile = updated
+            # Propagate the new model into the global runtime profile so that
+            # describe_provider() and the UI status badge reflect reality.
+            global _runtime_profile
+            _runtime_profile = updated
+            # Persist the updated profile (with the working model) so the
+            # corrected model survives a restart.
+            save_provider_key(self._api_key, updated)
 
 
 # --------------------------------------------------------------------------
