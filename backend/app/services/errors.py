@@ -60,3 +60,25 @@ class ProviderError(AppError):
     status = 502
     problem_type = "/errors/ai-provider"
     title = "AI provider error"
+
+
+class ProviderAuthError(ProviderError):
+    """The key was rejected by the provider (401/403).
+
+    Callers should roll back the provider state — the key is bad and should
+    not be saved.
+    """
+
+    problem_type = "/errors/ai-provider-auth"
+    title = "AI provider authentication failed"
+
+
+class ProviderConnectError(ProviderError):
+    """The provider could not be reached (timeout, DNS, firewall).
+
+    Callers may still accept and save the key — the key may be valid and the
+    network issue may be temporary.
+    """
+
+    problem_type = "/errors/ai-provider-unreachable"
+    title = "AI provider unreachable"

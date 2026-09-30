@@ -29,12 +29,23 @@ interface Props {
 function detectProviderFromKey(key: string): { name: string; icon: string } | null {
   const k = key.trim()
   if (!k) return null
+  // More specific prefixes must be tested before shorter ones they extend.
   if (k.startsWith('sk-ant-')) return { name: 'Anthropic', icon: '✦' }
   if (k.startsWith('sk-or-')) return { name: 'OpenRouter', icon: '◈' }
+  if (k.startsWith('sk-proj-')) return { name: 'OpenAI', icon: '⬡' }
   if (k.startsWith('gsk_')) return { name: 'Groq', icon: '▲' }
   if (k.startsWith('tog-')) return { name: 'Together AI', icon: '⊛' }
   if (k.startsWith('mis-')) return { name: 'Mistral AI', icon: '◎' }
   if (k.startsWith('AIza')) return { name: 'Google Gemini', icon: '✧' }
+  if (k.startsWith('co-')) return { name: 'Cohere', icon: '◆' }
+  if (k.startsWith('fw-')) return { name: 'Fireworks AI', icon: '✺' }
+  if (k.startsWith('pplx-')) return { name: 'Perplexity AI', icon: '◉' }
+  if (k.startsWith('dsk-')) return { name: 'DeepSeek', icon: '⟐' }
+  if (k.startsWith('AI21')) return { name: 'AI21 Labs', icon: '❋' }
+  if (k.startsWith('csk-')) return { name: 'Cerebras', icon: '⬢' }
+  if (k.startsWith('snova-')) return { name: 'SambaNova', icon: '◐' }
+  if (k.startsWith('hyp-')) return { name: 'Hyperbolic', icon: '⬟' }
+  if (k.startsWith('nvt-')) return { name: 'Novita AI', icon: '◇' }
   if (k.startsWith('sk-')) return { name: 'OpenAI', icon: '⬡' }
   if (k.length >= 20) return { name: 'AI Provider', icon: '◌' }
   return null
@@ -226,7 +237,9 @@ export function AIProviderPanel({ onStatusChange }: Props) {
                     </span>
                   ) : (
                     <span className="provider-key-note">
-                      Supports OpenAI · Groq · OpenRouter · Mistral · Together AI
+                      Supports OpenAI · Anthropic · Groq · Gemini · Mistral · Cohere
+                      · Together · OpenRouter · Fireworks · Perplexity · DeepSeek
+                      · Cerebras · SambaNova · and more
                     </span>
                   ))}
               </div>

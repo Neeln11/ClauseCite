@@ -22,7 +22,7 @@ from pydantic import BaseModel, Field
 
 from app.observability import get_logger
 from app.schemas import ProviderStatus
-from app.services.errors import ProviderError
+from app.services.errors import ProviderAuthError, ProviderConnectError, ProviderError
 from app.services.provider import (
     PROVIDER_REGISTRY,
     clear_runtime_provider,
@@ -129,9 +129,34 @@ async def configure_provider(body: ConfigureRequest) -> ProviderStatus:
     set_runtime_provider(body.api_key, profile)
     try:
         await get_provider().healthcheck()
+    except ProviderConnectError:
+        # Network is down or provider is temporarily unreachable.
+        # The key format was recognised (or the user chose the provider
+        # explicitly), so we accept it and let the first real question
+        # reveal whether it is valid. The key is saved so it survives a restart.
+        save_provider_key(body.api_key, profile)
+        log.warning(
+            "provider.configure_unverified",
+            provider=profile.provider_id,
+            reason="network unreachable during healthcheck",
+        )
+        return _status()
+    except ProviderAuthError as exc:
+        # The key was actively rejected (401/403) — rolling back is the right
+        # move: saving a bad key would disconnect a working session and only
+        # fail again on the next question.
+        clear_runtime_provider()
+        if previous.mode == "llm":
+            from app.services.provider import restore_saved_provider
+
+            restore_saved_provider()
+        log.warning("provider.configure_failed", provider=profile.provider_id)
+        raise HTTPException(
+            status_code=422,
+            detail=f"Could not connect to {profile.provider_name}: {exc.detail}",
+        ) from exc
     except ProviderError as exc:
-        # Roll back to whatever was active before, so a failed attempt to change
-        # keys does not disconnect a session that was working.
+        # Any other provider error (e.g. 500, wrong model name): same rollback.
         clear_runtime_provider()
         if previous.mode == "llm":
             from app.services.provider import restore_saved_provider

@@ -42,7 +42,7 @@ import httpx
 
 from app.config import Settings, get_settings
 from app.observability import get_logger
-from app.services.errors import ProviderError
+from app.services.errors import ProviderAuthError, ProviderConnectError, ProviderError
 
 
 @dataclass(slots=True)
@@ -80,22 +80,30 @@ class ProviderProfile:
     model: str
 
 
-# Checked in order, first prefix match wins — so more specific prefixes must come
-# before the general ones they extend (`sk-proj-` and `sk-ant-` before `sk-`).
+# ---------------------------------------------------------------------------
+# Detection rules — checked in order, first prefix match wins.
+#
+# Rule ordering matters: more specific prefixes ("sk-ant-", "sk-or-",
+# "sk-proj-") must appear before the general "sk-" they extend.
+#
+# Adding a new provider: append a (prefix, ProviderProfile) tuple.
+# If the provider speaks the OpenAI /chat/completions protocol, use
+# kind="openai_compatible" and no new class is needed.
+# If it has its own wire format, add a class below (see AnthropicProvider).
+# ---------------------------------------------------------------------------
 _DETECTION_RULES: tuple[tuple[str, ProviderProfile], ...] = (
+    # ── Anthropic (native API, not OpenAI-compatible) ──────────────────────
     (
         "sk-ant-",
         ProviderProfile(
             provider_id="anthropic",
             provider_name="Anthropic",
-            # Anthropic's API is not OpenAI-compatible: different endpoint,
-            # different auth header, different request and response shapes.
-            # Routing these keys through an OpenAI client fails authentication.
             kind="anthropic",
             base_url="https://api.anthropic.com",
             model="claude-opus-5",
         ),
     ),
+    # ── OpenRouter (must precede generic "sk-" rule) ───────────────────────
     (
         "sk-or-",
         ProviderProfile(
@@ -106,6 +114,7 @@ _DETECTION_RULES: tuple[tuple[str, ProviderProfile], ...] = (
             model="openai/gpt-4o-mini",
         ),
     ),
+    # ── OpenAI project keys (must precede generic "sk-" rule) ─────────────
     (
         "sk-proj-",
         ProviderProfile(
@@ -116,6 +125,7 @@ _DETECTION_RULES: tuple[tuple[str, ProviderProfile], ...] = (
             model="gpt-4o-mini",
         ),
     ),
+    # ── Groq ──────────────────────────────────────────────────────────────
     (
         "gsk_",
         ProviderProfile(
@@ -126,6 +136,7 @@ _DETECTION_RULES: tuple[tuple[str, ProviderProfile], ...] = (
             model="llama-3.3-70b-versatile",
         ),
     ),
+    # ── Together AI ───────────────────────────────────────────────────────
     (
         "tog-",
         ProviderProfile(
@@ -136,6 +147,7 @@ _DETECTION_RULES: tuple[tuple[str, ProviderProfile], ...] = (
             model="meta-llama/Llama-3.3-70B-Instruct-Turbo",
         ),
     ),
+    # ── Mistral AI ────────────────────────────────────────────────────────
     (
         "mis-",
         ProviderProfile(
@@ -146,24 +158,117 @@ _DETECTION_RULES: tuple[tuple[str, ProviderProfile], ...] = (
             model="mistral-small-latest",
         ),
     ),
+    # ── Google Gemini (OpenAI-compatible surface) ──────────────────────────
     (
         "AIza",
         ProviderProfile(
             provider_id="gemini",
             provider_name="Google Gemini",
-            # Google's Gemini API has an OpenAI-compatible surface, so no
-            # dedicated client class is needed — same as Groq/Together/Mistral.
-            # Unlike those, model ids need the "models/" prefix on this
-            # endpoint's /chat/completions — GET /models accepts either form,
-            # which is why a bad id here still passes healthcheck and only
-            # fails on the first real chat call. "gemini-flash-latest" is a
-            # Google-maintained alias, so this doesn't need bumping by hand
-            # every time a dated model version is retired.
             kind="openai_compatible",
             base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
             model="models/gemini-flash-latest",
         ),
     ),
+    # ── Cohere ────────────────────────────────────────────────────────────
+    (
+        "co-",
+        ProviderProfile(
+            provider_id="cohere",
+            provider_name="Cohere",
+            kind="openai_compatible",
+            base_url="https://api.cohere.com/compatibility/v1",
+            model="command-r-plus-08-2024",
+        ),
+    ),
+    # ── Fireworks AI ──────────────────────────────────────────────────────
+    (
+        "fw-",
+        ProviderProfile(
+            provider_id="fireworks",
+            provider_name="Fireworks AI",
+            kind="openai_compatible",
+            base_url="https://api.fireworks.ai/inference/v1",
+            model="accounts/fireworks/models/llama-v3p3-70b-instruct",
+        ),
+    ),
+    # ── Perplexity AI ─────────────────────────────────────────────────────
+    (
+        "pplx-",
+        ProviderProfile(
+            provider_id="perplexity",
+            provider_name="Perplexity AI",
+            kind="openai_compatible",
+            base_url="https://api.perplexity.ai",
+            model="llama-3.1-sonar-large-128k-online",
+        ),
+    ),
+    # ── Deepseek ──────────────────────────────────────────────────────────
+    (
+        "dsk-",
+        ProviderProfile(
+            provider_id="deepseek",
+            provider_name="DeepSeek",
+            kind="openai_compatible",
+            base_url="https://api.deepseek.com/v1",
+            model="deepseek-chat",
+        ),
+    ),
+    # ── AI21 Labs ─────────────────────────────────────────────────────────
+    (
+        "AI21",
+        ProviderProfile(
+            provider_id="ai21",
+            provider_name="AI21 Labs",
+            kind="openai_compatible",
+            base_url="https://api.ai21.com/studio/v1",
+            model="jamba-1.5-large",
+        ),
+    ),
+    # ── Cerebras ──────────────────────────────────────────────────────────
+    (
+        "csk-",
+        ProviderProfile(
+            provider_id="cerebras",
+            provider_name="Cerebras",
+            kind="openai_compatible",
+            base_url="https://api.cerebras.ai/v1",
+            model="llama3.3-70b",
+        ),
+    ),
+    # ── SambaNova ─────────────────────────────────────────────────────────
+    (
+        "snova-",
+        ProviderProfile(
+            provider_id="sambanova",
+            provider_name="SambaNova",
+            kind="openai_compatible",
+            base_url="https://api.sambanova.ai/v1",
+            model="Meta-Llama-3.3-70B-Instruct",
+        ),
+    ),
+    # ── Hyperbolic ────────────────────────────────────────────────────────
+    (
+        "hyp-",
+        ProviderProfile(
+            provider_id="hyperbolic",
+            provider_name="Hyperbolic",
+            kind="openai_compatible",
+            base_url="https://api.hyperbolic.xyz/v1",
+            model="meta-llama/Llama-3.3-70B-Instruct",
+        ),
+    ),
+    # ── Novita AI ─────────────────────────────────────────────────────────
+    (
+        "nvt-",
+        ProviderProfile(
+            provider_id="novita",
+            provider_name="Novita AI",
+            kind="openai_compatible",
+            base_url="https://api.novita.ai/v3/openai",
+            model="meta-llama/llama-3.3-70b-instruct",
+        ),
+    ),
+    # ── OpenAI (generic "sk-" — must be last among sk- variants) ──────────
     (
         "sk-",
         ProviderProfile(
@@ -526,6 +631,10 @@ class GenericLLMProvider:
         the endpoint that's actually used, which let a wrong model name (e.g.
         the "models/" prefix Google's endpoint requires) report as connected
         and only fail on the user's first real question.
+
+        Raises `ProviderAuthError` for bad keys (401/403) so the caller can
+        reject them.  Raises `ProviderConnectError` for network problems so
+        the caller can accept the key and retry later.
         """
         try:
             await self._client.chat.completions.create(
@@ -534,7 +643,10 @@ class GenericLLMProvider:
                 max_tokens=1,
             )
         except Exception as exc:
-            raise ProviderError(_readable_provider_error(exc)) from exc
+            msg = _readable_provider_error(exc)
+            if _is_network_error(exc):
+                raise ProviderConnectError(msg) from exc
+            raise ProviderAuthError(msg) from exc
 
 
 # --------------------------------------------------------------------------
@@ -619,12 +731,40 @@ class AnthropicProvider:
                 messages=[{"role": "user", "content": "ping"}],
             )
         except Exception as exc:
-            raise ProviderError(_readable_provider_error(exc)) from exc
+            msg = _readable_provider_error(exc)
+            if _is_network_error(exc):
+                raise ProviderConnectError(msg) from exc
+            raise ProviderAuthError(msg) from exc
 
 
 # --------------------------------------------------------------------------
 # Error shaping
 # --------------------------------------------------------------------------
+
+
+def _is_network_error(exc: Exception) -> bool:
+    """True when the failure is a connectivity problem, not a key problem.
+
+    Auth failures (401/403) mean the key is wrong and should be rejected.
+    Network failures (timeout, DNS, connection refused) say nothing about
+    whether the key is valid — only that the provider is unreachable right now.
+    We keep those two cases separate so the configure endpoint can accept a
+    key whose provider is temporarily unreachable instead of silently
+    discarding it.
+    """
+    import httpx
+    from openai import APIConnectionError, APITimeoutError
+
+    if isinstance(exc, (APIConnectionError, APITimeoutError)):
+        return True
+    if isinstance(exc, httpx.TransportError):
+        return True
+    # openai SDK wraps most network errors as APIConnectionError, but
+    # belt-and-suspenders: also check the status code absence.
+    status = getattr(exc, "status_code", None)
+    if status is None and "connect" in type(exc).__name__.lower():
+        return True
+    return False
 
 
 def _readable_provider_error(exc: Exception) -> str:
@@ -634,6 +774,11 @@ def _readable_provider_error(exc: Exception) -> str:
     almost always one of four things: the key is wrong, the key is out of
     credit, the model name is wrong, or the endpoint is unreachable.
     """
+    if _is_network_error(exc):
+        return (
+            "Could not reach the provider — network or firewall issue. "
+            "The key has been saved and will be used when the connection is restored."
+        )
     status = getattr(exc, "status_code", None)
     if status in (401, 403):
         return "The API key was rejected. Check that it is correct and still active."
