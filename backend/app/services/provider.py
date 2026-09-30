@@ -631,11 +631,11 @@ class GenericLLMProvider:
         """Verify the key and ensure a working model is configured.
 
         Two-phase strategy:
-        1. Call `GET /models` — this is auth-only and model-name-independent.
+        1. Call `GET /models` — auth-only and model-name-independent.
            A 401/403 here definitively means the key is wrong.
-        2. If the profile's default model is not in the live model list, pick
-           the first available one and update the runtime profile in place.
-           This makes the system self-healing when a provider retires a model.
+        2. If the profile's default model is not in the live list (or requires
+           terms acceptance that the account hasn't granted), pick the first
+           suitable chat model automatically.
 
         Error classification:
         - 401/403  → `ProviderAuthError`: key is bad, caller must roll back.
@@ -650,29 +650,33 @@ class GenericLLMProvider:
                 raise ProviderConnectError(msg) from exc
             raise ProviderAuthError(msg) from exc
 
-        # Build set of available model ids, stripping ownership prefixes
-        # (some providers return "accounts/org/models/llama-x" style ids).
-        available: list[str] = [m.id for m in models_page.data if m.id]
-        if not available:
-            # Empty list: the endpoint is up and authenticated, but has no
-            # models. Treat as a connect problem — the provider may be setting
-            # up the account.
+        # Keep only text-generation chat models. Providers like Groq expose
+        # speech, TTS, embedding, and terms-gated models in the same list —
+        # picking one of those as the default produces cryptic errors.
+        chat_models: list[str] = [
+            m.id for m in models_page.data if m.id and _is_chat_model(m.id)
+        ]
+
+        # Fall back to the full list if the filter produced nothing (e.g. a
+        # provider whose model ids follow an unexpected naming convention).
+        candidates = chat_models or [m.id for m in models_page.data if m.id]
+
+        if not candidates:
             raise ProviderConnectError(
                 "The provider returned no available models. Try again shortly."
             )
 
-        if self._profile.model not in available:
-            # The configured model was retired or renamed. Pick the first
-            # available model so the user gets an answer rather than an error.
-            # Prefer models whose name includes "instruct" or "chat" over raw
-            # base models, which typically refuse instruction-following prompts.
+        if self._profile.model not in candidates:
+            # Configured model was retired/renamed/gated. Prefer larger/smarter
+            # models first (keywords checked in priority order), then fall back.
             preferred = next(
                 (
                     m
-                    for m in available
-                    if any(k in m for k in ("instruct", "chat", "versatile", "instant"))
+                    for kw in _PREFERRED_MODEL_KEYWORDS
+                    for m in candidates
+                    if kw in m.lower()
                 ),
-                available[0],
+                candidates[0],
             )
             log.info(
                 "provider.model_auto_selected",
@@ -682,13 +686,53 @@ class GenericLLMProvider:
             )
             updated = dataclasses.replace(self._profile, model=preferred)
             self._profile = updated
-            # Propagate the new model into the global runtime profile so that
-            # describe_provider() and the UI status badge reflect reality.
+            # Propagate into the global runtime profile so the UI badge and
+            # describe_provider() reflect the model that will actually be used.
             global _runtime_profile
             _runtime_profile = updated
-            # Persist the updated profile (with the working model) so the
-            # corrected model survives a restart.
+            # Persist so the corrected model survives a restart.
             save_provider_key(self._api_key, updated)
+
+
+# --------------------------------------------------------------------------
+# Chat model filter
+# --------------------------------------------------------------------------
+
+# Model ID fragments that indicate a text-generation chat model.
+_CHAT_FAMILIES = (
+    "llama", "mistral", "mixtral", "gemma", "phi", "qwen", "falcon",
+    "deepseek", "command", "solar", "yi-", "gpt", "claude", "vicuna",
+    "zephyr", "wizard", "hermes", "openchat", "starling", "orca",
+    "nous", "dolphin", "neural", "stablelm",
+)
+
+# Fragments that flag a model as NOT a chat model (speech, audio, embed, etc.).
+_NON_CHAT_FRAGMENTS = (
+    "whisper", "tts", "speech", "audio", "embed", "encode",
+    "davinci-edit", "moderation", "dall-e", "vision",
+    # Known terms-gated or specialised non-chat models on Groq:
+    "canopy", "orpheus", "distil-whisper",
+)
+
+# Keywords checked in priority order when auto-selecting a fallback model.
+# Larger, instruction-tuned models are preferred over smaller base models.
+_PREFERRED_MODEL_KEYWORDS = (
+    "70b", "72b", "versatile", "large", "instruct", "chat", "instant",
+)
+
+
+def _is_chat_model(model_id: str) -> bool:
+    """True when the model id looks like a text-generation chat model.
+
+    Providers mix speech, embedding, and vision models into the same /models
+    catalogue. Using one of those as the default breaks stream_chat in ways
+    that are confusing to debug. This filter keeps only models we expect to
+    accept instruction-following prompts.
+    """
+    mid = model_id.lower()
+    if any(f in mid for f in _NON_CHAT_FRAGMENTS):
+        return False
+    return any(f in mid for f in _CHAT_FAMILIES)
 
 
 # --------------------------------------------------------------------------
@@ -819,6 +863,18 @@ def _readable_provider_error(exc: Exception) -> str:
         return (
             "Could not reach the provider — network or firewall issue. "
             "The key has been saved and will be used when the connection is restored."
+        )
+    # Some providers embed a machine-readable error code in the response body.
+    # Check for known codes before falling through to the HTTP status.
+    body = getattr(exc, "body", None) or {}
+    error_code = ""
+    if isinstance(body, dict):
+        error_code = (body.get("error") or {}).get("code", "") or ""
+    if error_code == "model_terms_required":
+        return (
+            "The selected model requires terms acceptance. "
+            "Visit the provider console to accept terms, then reconnect — "
+            "or use the provider dropdown to pick a different model."
         )
     status = getattr(exc, "status_code", None)
     if status in (401, 403):
