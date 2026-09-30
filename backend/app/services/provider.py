@@ -133,7 +133,10 @@ _DETECTION_RULES: tuple[tuple[str, ProviderProfile], ...] = (
             provider_name="Groq",
             kind="openai_compatible",
             base_url="https://api.groq.com/openai/v1",
-            model="llama-3.3-70b-versatile",
+            # llama-3.1-8b-instant: lightweight, fast, and guaranteed available
+            # on Groq's free tier. Larger models (e.g. llama-3.3-70b-versatile)
+            # rotate in and out; the user can override via the Custom dropdown.
+            model="llama-3.1-8b-instant",
         ),
     ),
     # ── Together AI ───────────────────────────────────────────────────────
@@ -632,9 +635,11 @@ class GenericLLMProvider:
         the "models/" prefix Google's endpoint requires) report as connected
         and only fail on the user's first real question.
 
-        Raises `ProviderAuthError` for bad keys (401/403) so the caller can
-        reject them.  Raises `ProviderConnectError` for network problems so
-        the caller can accept the key and retry later.
+        Error classification:
+        - 401/403 → `ProviderAuthError`: key is bad, caller must roll back.
+        - 404     → `ProviderConnectError`: model name may have been retired;
+                    the key itself is likely valid, so the caller accepts it.
+        - network → `ProviderConnectError`: provider unreachable right now.
         """
         try:
             await self._client.chat.completions.create(
@@ -644,7 +649,11 @@ class GenericLLMProvider:
             )
         except Exception as exc:
             msg = _readable_provider_error(exc)
-            if _is_network_error(exc):
+            status = getattr(exc, "status_code", None)
+            if _is_network_error(exc) or status == 404:
+                # Network down OR model not found: the key may still be valid.
+                # Accept and save it; the first real question will surface any
+                # remaining problems with a recoverable stream error.
                 raise ProviderConnectError(msg) from exc
             raise ProviderAuthError(msg) from exc
 
@@ -732,7 +741,8 @@ class AnthropicProvider:
             )
         except Exception as exc:
             msg = _readable_provider_error(exc)
-            if _is_network_error(exc):
+            status = getattr(exc, "status_code", None)
+            if _is_network_error(exc) or status == 404:
                 raise ProviderConnectError(msg) from exc
             raise ProviderAuthError(msg) from exc
 
@@ -781,7 +791,10 @@ def _readable_provider_error(exc: Exception) -> str:
     if status in (401, 403):
         return "The API key was rejected. Check that it is correct and still active."
     if status == 404:
-        return "The endpoint or model was not found for this key."
+        return (
+            "The model or endpoint was not found. The key has been saved — "
+            "use the provider dropdown to pick a different model if needed."
+        )
     if status == 429:
         return "The provider rate-limited or declined the request — check your quota or billing."
     if status is not None and status >= 500:
